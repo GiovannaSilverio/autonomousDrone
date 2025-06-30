@@ -32,7 +32,7 @@ class Drone:
         self.motor2.setVelocidade(m2)
         self.motor3.setVelocidade(m3)
 
-    def atualizar(self):
+    def atualizar(self, obstaculos):
         self.motorMixing()
 
         # Mantém o yaw no intervalo -180 a 180
@@ -69,7 +69,7 @@ class Drone:
         self.y = max(0, min(300, self.y))
 
         # atualiza o lidar
-        self.lidar.atualizar(self)
+        self.lidar.atualizar(self, obstaculos)
 
 
     def controlar(self, keys):
@@ -107,9 +107,23 @@ class SensorLidar:
     def __init__(self):
         # distancia de um drone do objeto mais próximo verticalmente 
         self.distancia = 0
+        self.chao_y_detectado = 300
 
-    def atualizar(self, drone):
-        self.distancia = 300 - drone.y
+    def atualizar(self, drone, obstaculos):
+        chao_y = 300
+
+        for obs in obstaculos:
+            # A função collidepoint verifica se o ponto (x,z) do drone está dentro do retângulo do obstáculo
+            if obs.rect_chao.collidepoint(drone.x, drone.z):
+                # Se estiver sobre um obstáculo, o "chão" agora é o topo dele
+                topo_obs_y = 300 - obs.altura
+                # Se este obstáculo for mais alto que o chão encontrado até agora, atualize
+                if topo_obs_y < chao_y:
+                    chao_y = topo_obs_y
+
+        self.chao_y_detectado = chao_y
+
+        self.distancia = chao_y - drone.y
 
 
 class Motor:
@@ -117,6 +131,13 @@ class Motor:
         self.velocidade = 0
     def setVelocidade(self, v):
         self.velocidade = max(0, min(100, v))
+
+class Obstaculo:
+    def __init__(self, x, z, largura, profundidade, altura):
+        # A posição e dimensões no "chão" (plano X/Z)
+        self.rect_chao = pygame.Rect(x, z, largura, profundidade)
+        # A altura do obstáculo a partir do chão
+        self.altura = altura
 
 # --- AMBIENTE ---
 def desenhar_vista_superior(screen, drone, area):
@@ -152,9 +173,9 @@ def desenhar_vista_lateral(screen, drone, area):
 
     # Ponto inicial: centro do drone
     ponto_inicio = corpo_rect.center
-    # Ponto final: na mesma horizontal do drone, mas no "chão" (y=300)
-    ponto_fim = (corpo_rect.centerx, area.top + 300)
-    # Desenha uma linha vermelha com 2 pixels de espessura para representar o Lidar
+    # Ponto final: na mesma horizontal, mas no chão DETECTADO pelo Lidar
+    ponto_fim = (corpo_rect.centerx, area.top + drone.lidar.chao_y_detectado)
+    # Desenha a linha vermelha para representar o Lidar
     pygame.draw.line(screen, (255, 0, 0), ponto_inicio, ponto_fim, 2)
 
     font = pygame.font.SysFont(None, 20)
@@ -185,6 +206,36 @@ def desenhar_telemetria(screen, drone):
         screen.blit(superficie_texto, (pos_x, pos_y))
         pos_y += 20
 
+def desenhar_obstaculos_superior(screen, obstaculos, area):
+    """ Desenha os obstáculos na vista de cima """
+    for obs in obstaculos:
+        # A coordenada X do mundo é a mesma da tela.
+        # A coordenada Z do mundo é mapeada para o eixo Y da tela, com Z=0 no centro da área.
+        pos_x_tela = obs.rect_chao.left
+        pos_y_tela = area.top + (area.height // 2) + obs.rect_chao.top # Z=0 está no meio da área
+
+        rect_desenho = pygame.Rect(pos_x_tela, pos_y_tela, obs.rect_chao.width, obs.rect_chao.height)
+        pygame.draw.rect(screen, (100, 100, 100), rect_desenho)
+
+def desenhar_obstaculos_lateral(screen, obstaculos, area):
+    """ Desenha os obstáculos na vista lateral """
+    for obs in obstaculos:
+        # A coordenada Z do mundo é o eixo X da tela. Z=0 está no meio da área.
+        # A altura Y do mundo é o eixo Y da tela. Y=0 (alto) está no topo da área.
+
+        # Posição horizontal na tela é baseada na coordenada Z do obstáculo
+        pos_x_tela = area.left + (area.width // 2) + obs.rect_chao.top
+        
+        # Posição vertical na tela é baseada na altura do obstáculo. O chão está em 300.
+        pos_y_tela = area.top + (300 - obs.altura)
+        
+        # Na vista lateral, a "largura" que vemos é a profundidade do obstáculo
+        largura_na_tela = obs.rect_chao.height # Usar profundidade
+        altura_na_tela = obs.altura
+        
+        rect_desenho = pygame.Rect(pos_x_tela, pos_y_tela, largura_na_tela, altura_na_tela)
+        pygame.draw.rect(screen, (0, 100, 0), rect_desenho)
+
 # --- MAIN ---
 def main():
     pygame.init()
@@ -192,20 +243,36 @@ def main():
     pygame.display.set_caption("Drone 3D Simulado - Duas Vistas")
     clock = pygame.time.Clock()
     drone = Drone()
+
+    obstaculos = [
+        Obstaculo(x=100, z=50, largura=80, profundidade=50, altura=100),
+        Obstaculo(x=300, z=100, largura=50, profundidade=50, altura=50)
+    ]
+
     running = True
+
     while running:
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
         keys = pygame.key.get_pressed()
         drone.controlar(keys)
-        drone.atualizar()
+        drone.atualizar(obstaculos)
         tela_cima = pygame.Rect(0, 0, 800, 300)
         tela_lado = pygame.Rect(0, 300, 800, 300)
         screen.fill((255, 255, 255))
+
+        # Desenha a vista de cima
         desenhar_vista_superior(screen, drone, tela_cima)
+        desenhar_obstaculos_superior(screen, obstaculos, tela_cima)
+
+        # Desenha a vista lateral
         desenhar_vista_lateral(screen, drone, tela_lado)
+        desenhar_obstaculos_lateral(screen, obstaculos, tela_lado)
+
+        # Telemetria por cima de tudo
         desenhar_telemetria(screen, drone)
+
         pygame.display.flip()
         clock.tick(60)
     pygame.quit()
