@@ -1,7 +1,8 @@
 import pygame
 import math
 
-# --- DRONE ---
+PONTO_DE_ESTABILIDADE = 50
+
 class Drone:
     def __init__(self):
         self.x = 400
@@ -13,6 +14,7 @@ class Drone:
         self.yaw = 0
         self.yaw_command = 0 
         self.throttle = 50
+        self.lidar = SensorLidar()
 
         self.motor0 = Motor()
         self.motor1 = Motor()
@@ -20,10 +22,10 @@ class Drone:
         self.motor3 = Motor()
 
     def motorMixing(self):
-        m0 = self.throttle - self.pitch + self.roll - self.yaw_command
-        m1 = self.throttle - self.pitch - self.roll + self.yaw_command
-        m2 = self.throttle + self.pitch - self.roll - self.yaw_command
-        m3 = self.throttle + self.pitch + self.roll + self.yaw_command
+        m0 = self.throttle - self.pitch - self.roll - self.yaw_command
+        m1 = self.throttle - self.pitch + self.roll + self.yaw_command
+        m2 = self.throttle + self.pitch + self.roll - self.yaw_command
+        m3 = self.throttle + self.pitch - self.roll + self.yaw_command
 
         self.motor0.setVelocidade(m0)
         self.motor1.setVelocidade(m1)
@@ -39,10 +41,10 @@ class Drone:
         
         # Atualização de altura
         media = (self.motor0.velocidade + self.motor1.velocidade + self.motor2.velocidade + self.motor3.velocidade) / 4
-        self.y -= (media - 50) * 0.1
+        self.y = self.y - (media - PONTO_DE_ESTABILIDADE) * 0.1 #seta altura do drone, se ele fica estabilizado ou subindo/descendo
 
         pitch_magnitude = self.pitch * 0.2
-        roll_magnitude = self.roll * 0.2  # NOVO: Magnitude do movimento lateral (roll)
+        roll_magnitude = self.roll * 0.2 
         angulo_rad = math.radians(self.yaw)
 
         # Vetor de movimento para FRENTE/TRÁS (Pitch)
@@ -65,6 +67,9 @@ class Drone:
         self.x = max(0, min(800, self.x))
         self.z = max(-150, min(150, self.z))
         self.y = max(0, min(300, self.y))
+
+        # atualiza o lidar
+        self.lidar.atualizar(self)
 
 
     def controlar(self, keys):
@@ -98,6 +103,14 @@ class Drone:
         else:
             self.yaw_command = 0
 
+class SensorLidar:
+    def __init__(self):
+        # distancia de um drone do objeto mais próximo verticalmente 
+        self.distancia = 0
+
+    def atualizar(self, drone):
+        self.distancia = 300 - drone.y
+
 
 class Motor:
     def __init__(self):
@@ -124,6 +137,7 @@ def desenhar_vista_superior(screen, drone, area):
 
     font = pygame.font.SysFont(None, 20)
     txt = font.render("Vista de Cima (X/Z/Yaw)", True, (0, 0, 0))
+    screen.blit(txt, (area.left + 10, area.top + 10))
 
 def desenhar_vista_lateral(screen, drone, area):
     pygame.draw.rect(screen, (200, 255, 200), area)
@@ -135,6 +149,14 @@ def desenhar_vista_lateral(screen, drone, area):
     pygame.draw.rect(screen, (100, 100, 255), corpo_rect)
     nariz_offset = 15 if drone.pitch > 0 else (-15 if drone.pitch < 0 else 0)
     pygame.draw.circle(screen, (255, 100, 0), (corpo_rect.centerx + nariz_offset, corpo_rect.centery), 4)
+
+    # Ponto inicial: centro do drone
+    ponto_inicio = corpo_rect.center
+    # Ponto final: na mesma horizontal do drone, mas no "chão" (y=300)
+    ponto_fim = (corpo_rect.centerx, area.top + 300)
+    # Desenha uma linha vermelha com 2 pixels de espessura para representar o Lidar
+    pygame.draw.line(screen, (255, 0, 0), ponto_inicio, ponto_fim, 2)
+
     font = pygame.font.SysFont(None, 20)
     txt = font.render("Vista Lateral (Z/Y/Pitch)", True, (0, 0, 0))
     screen.blit(txt, (area.left + 10, area.top + 10))
@@ -153,9 +175,10 @@ def desenhar_telemetria(screen, drone):
         f"Att (P,R,Y): {drone.pitch:.0f}, {drone.roll:.0f}, {drone.yaw:.1f}",
         f"Throttle: {drone.throttle:.0f}",
         f"Yaw Command: {drone.yaw_command:.0f}",
-        "--- Motores ---",
+        "Motores",
         f"M1(FL): {drone.motor1.velocidade:<3}  M0(FR): {drone.motor0.velocidade:<3}",
         f"M2(RL): {drone.motor2.velocidade:<3}  M3(RR): {drone.motor3.velocidade:<3}",
+        f"Distância do Chão: {drone.lidar.distancia:.1f}",
     ]
     for texto in dados:
         superficie_texto = font_dados.render(texto, True, cor_texto)
