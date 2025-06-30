@@ -4,9 +4,9 @@ import math
 # --- DRONE ---
 class Drone:
     def __init__(self):
-        self.x = 400  # Esquerda-direita
-        self.y = 300  # Altura
-        self.z = 0    # Frente-trás
+        self.x = 400
+        self.y = 150
+        self.z = 0
 
         self.pitch = 0
         self.roll = 0
@@ -33,11 +33,7 @@ class Drone:
     def atualizar(self):
         self.motorMixing()
 
-        # Aplica o comando de rotação para alterar o ângulo yaw do drone
-        # O valor 0.5 controla a velocidade da rotação
-        self.yaw += self.yaw_command * 0.15
-
-        # Mantém o yaw no intervalo -180 a 180 para evitar números muito grandes
+        # Mantém o yaw no intervalo -180 a 180
         if self.yaw > 180: self.yaw -= 360
         if self.yaw < -180: self.yaw += 360
         
@@ -45,13 +41,22 @@ class Drone:
         media = (self.motor0.velocidade + self.motor1.velocidade + self.motor2.velocidade + self.motor3.velocidade) / 4
         self.y -= (media - 50) * 0.1
 
-        # --- CORREÇÃO DA LÓGICA DE MOVIMENTO ---
-        # `pitch` agora é positivo para frente, então não precisamos mais negar
-        magnitude = self.pitch * 0.2
+        pitch_magnitude = self.pitch * 0.2
+        roll_magnitude = self.roll * 0.2  # NOVO: Magnitude do movimento lateral (roll)
         angulo_rad = math.radians(self.yaw)
 
-        dz = math.sin(angulo_rad) * magnitude
-        dx = math.cos(angulo_rad) * magnitude
+        # Vetor de movimento para FRENTE/TRÁS (Pitch)
+        dx_pitch = math.cos(angulo_rad) * pitch_magnitude #esquerda e direita
+        dz_pitch = math.sin(angulo_rad) * pitch_magnitude #frente e tras
+        
+        #Vetor de movimento para os LADOS (Roll)
+        # Este vetor é perpendicular ao veto de pitch.
+        dx_roll = -math.sin(angulo_rad) * roll_magnitude #esquerda e direita
+        dz_roll = math.cos(angulo_rad) * roll_magnitude #frente e tras
+
+        # Combina os dois vetores para o movimento final
+        dx = dx_pitch + dx_roll 
+        dz = dz_pitch + dz_roll
         
         self.z += dz
         self.x += dx
@@ -67,6 +72,8 @@ class Drone:
             self.throttle += 1
         if keys[pygame.K_DOWN]:
             self.throttle -= 1
+        self.throttle = max(0, min(100, self.throttle))
+        
         if keys[pygame.K_w]:
             self.pitch = 10
         elif keys[pygame.K_s]:
@@ -74,19 +81,23 @@ class Drone:
         else:
             self.pitch = 0
 
-        if keys[pygame.K_a]:
-            self.roll = -10
-        elif keys[pygame.K_d]:
+        if keys[pygame.K_d]:
             self.roll = 10
+        elif keys[pygame.K_a]:
+            self.roll = -10
         else:
             self.roll = 0
 
+        # Lógica de Yaw estável e direta
         if keys[pygame.K_LEFT]:
-            self.yaw_command -= 2
-        if keys[pygame.K_RIGHT]:
-            self.yaw_command += 2
+            self.yaw -= 2.5
+            self.yaw_command = 15
+        elif keys[pygame.K_RIGHT]:
+            self.yaw += 2.5
+            self.yaw_command = -15
+        else:
+            self.yaw_command = 0
 
-        self.throttle = max(0, min(100, self.throttle))
 
 class Motor:
     def __init__(self):
@@ -97,15 +108,13 @@ class Motor:
 # --- AMBIENTE ---
 def desenhar_vista_superior(screen, drone, area):
     pygame.draw.rect(screen, (220, 240, 255), area)
-
-    # Correção no cálculo da posição de desenho
     centro_x = int(drone.x)
     centro_z = area.top + area.height // 2 + int(drone.z)
     tamanho = 20
 
     angulo_rad = math.radians(drone.yaw)
-    dx_frente = math.cos(angulo_rad) * tamanho # Cosseno para X
-    dz_frente = math.sin(angulo_rad) * tamanho # Seno para Z
+    dx_frente = math.cos(angulo_rad) * tamanho
+    dz_frente = math.sin(angulo_rad) * tamanho
 
     corpo = (centro_x, centro_z)
     frente = (centro_x + dx_frente, centro_z + dz_frente)
@@ -115,60 +124,43 @@ def desenhar_vista_superior(screen, drone, area):
 
     font = pygame.font.SysFont(None, 20)
     txt = font.render("Vista de Cima (X/Z/Yaw)", True, (0, 0, 0))
-    screen.blit(txt, (area.left + 10, area.top + 10))
 
 def desenhar_vista_lateral(screen, drone, area):
     pygame.draw.rect(screen, (200, 255, 200), area)
 
-    centro_z = area.left + area.width // 2 + int(drone.z)
-    centro_y = area.top + area.height // 2 + int(drone.y)
-    tamanho = 20
-
-    pitch_rad = math.radians(drone.pitch)
-    dz = math.sin(pitch_rad) * tamanho
-    dy = -math.cos(pitch_rad) * tamanho
-
-    corpo = (centro_z, centro_y)
-    frente = (centro_z + dz, centro_y + dy)
-
-    pygame.draw.circle(screen, (100, 100, 255), corpo, 10)
-    pygame.draw.line(screen, (255, 100, 0), corpo, frente, 3)
-
+    centro_z_tela = area.left + area.width // 2 + int(drone.z)
+    centro_y_tela = area.top + int(drone.y)
+    corpo_rect = pygame.Rect(0, 0, 30, 10)
+    corpo_rect.center = (centro_z_tela, centro_y_tela)
+    pygame.draw.rect(screen, (100, 100, 255), corpo_rect)
+    nariz_offset = 15 if drone.pitch > 0 else (-15 if drone.pitch < 0 else 0)
+    pygame.draw.circle(screen, (255, 100, 0), (corpo_rect.centerx + nariz_offset, corpo_rect.centery), 4)
     font = pygame.font.SysFont(None, 20)
     txt = font.render("Vista Lateral (Z/Y/Pitch)", True, (0, 0, 0))
     screen.blit(txt, (area.left + 10, area.top + 10))
 
 def desenhar_telemetria(screen, drone):
-    """Desenha os dados de telemetria do drone na tela."""
     font_titulo = pygame.font.SysFont(None, 24)
     font_dados = pygame.font.SysFont(None, 22)
-    cor_texto = (10, 10, 10)  # Quase preto
-    pos_x = 600  # Posição X no canto direito
-    pos_y = 35   # Posição Y no topo
-
-    # Lista de dados para exibir
-    telemetria = []
-    
-    # Título
-    titulo = font_titulo.render("--- TELEMETRIA ---", True, cor_texto)
+    cor_texto = (10, 10, 10)
+    pos_x = 580
+    pos_y = 35
+    titulo = font_titulo.render("TELEMETRIA", True, cor_texto)
     screen.blit(titulo, (pos_x, pos_y))
-
-    # Dados
     pos_y += 25
     dados = [
         f"Pos (X,Y,Z): {drone.x:.1f}, {drone.y:.1f}, {drone.z:.1f}",
-        f"Att (P,R,Y): {drone.pitch:.1f}, {drone.roll:.1f}, {drone.yaw:.1f}",
+        f"Att (P,R,Y): {drone.pitch:.0f}, {drone.roll:.0f}, {drone.yaw:.1f}",
         f"Throttle: {drone.throttle:.0f}",
+        f"Yaw Command: {drone.yaw_command:.0f}",
         "--- Motores ---",
-        f"M0: {drone.motor0.velocidade:<3}  M1: {drone.motor1.velocidade:<3}",
-        f"M3: {drone.motor3.velocidade:<3}  M2: {drone.motor2.velocidade:<3}",
+        f"M1(FL): {drone.motor1.velocidade:<3}  M0(FR): {drone.motor0.velocidade:<3}",
+        f"M2(RL): {drone.motor2.velocidade:<3}  M3(RR): {drone.motor3.velocidade:<3}",
     ]
-
-    # Renderiza cada linha de dados
     for texto in dados:
         superficie_texto = font_dados.render(texto, True, cor_texto)
         screen.blit(superficie_texto, (pos_x, pos_y))
-        pos_y += 20  # Incrementa Y para a próxima linha
+        pos_y += 20
 
 # --- MAIN ---
 def main():
@@ -176,30 +168,23 @@ def main():
     screen = pygame.display.set_mode((800, 600))
     pygame.display.set_caption("Drone 3D Simulado - Duas Vistas")
     clock = pygame.time.Clock()
-
     drone = Drone()
     running = True
     while running:
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
-
         keys = pygame.key.get_pressed()
         drone.controlar(keys)
         drone.atualizar()
-
-        # Divisão da tela
         tela_cima = pygame.Rect(0, 0, 800, 300)
         tela_lado = pygame.Rect(0, 300, 800, 300)
-
         screen.fill((255, 255, 255))
         desenhar_vista_superior(screen, drone, tela_cima)
         desenhar_vista_lateral(screen, drone, tela_lado)
         desenhar_telemetria(screen, drone)
-
         pygame.display.flip()
         clock.tick(60)
-
     pygame.quit()
 
 if __name__ == "__main__":
