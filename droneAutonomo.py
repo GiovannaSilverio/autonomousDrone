@@ -2,6 +2,8 @@ import pygame
 import math
 
 PONTO_DE_ESTABILIDADE = 50
+DISTANCIA_MINIMA_LIDAR = 20.0
+
 
 class Drone:
     def __init__(self):
@@ -15,6 +17,7 @@ class Drone:
         self.yaw_command = 0 
         self.throttle = 50
         self.lidar = SensorLidar()
+        self.parada_emergencia = False 
 
         self.motor0 = Motor()
         self.motor1 = Motor()
@@ -70,27 +73,42 @@ class Drone:
 
         # atualiza o lidar
         self.lidar.atualizar(self, obstaculos)
+        
+
+        if self.lidar.distancia < DISTANCIA_MINIMA_LIDAR:
+            self.parada_emergencia = True # Ativa o estado de parada
+            self.throttle = PONTO_DE_ESTABILIDADE
+            # Força a posição Y para a distância exata
+            self.y = self.lidar.chao_y_detectado - DISTANCIA_MINIMA_LIDAR
+        else:
+            self.parada_emergencia = False # Desativa se estiver seguro
 
 
-    def controlar(self, keys):
+
+    def controlar(self, keys):                                                                                                                         
         if keys[pygame.K_UP]:
             self.throttle += 1
         if keys[pygame.K_DOWN]:
             self.throttle -= 1
         self.throttle = max(0, min(100, self.throttle))
         
-        if keys[pygame.K_w]:
-            self.pitch = 10
-        elif keys[pygame.K_s]:
-            self.pitch = -10
-        else:
-            self.pitch = 0
+        if not self.parada_emergencia:
+            if keys[pygame.K_w]:
+                self.pitch = 10
+            elif keys[pygame.K_s]:
+                self.pitch = -10
+            else:
+                self.pitch = 0
 
-        if keys[pygame.K_d]:
-            self.roll = 10
-        elif keys[pygame.K_a]:
-            self.roll = -10
+            if keys[pygame.K_d]:
+                self.roll = 10
+            elif keys[pygame.K_a]:
+                self.roll = -10
+            else:
+                self.roll = 0
         else:
+            # Garante que pitch e roll sejam zero durante a parada
+            self.pitch = 0
             self.roll = 0
 
         # Lógica de Yaw estável e direta
@@ -102,6 +120,9 @@ class Drone:
             self.yaw_command = -15
         else:
             self.yaw_command = 0
+
+
+        
 
 class SensorLidar:
     def __init__(self):
@@ -139,9 +160,8 @@ class Obstaculo:
         # A altura do obstáculo a partir do chão
         self.altura = altura
 
-# --- AMBIENTE ---
 def desenhar_vista_superior(screen, drone, area):
-    pygame.draw.rect(screen, (220, 240, 255), area)
+    
     centro_x = int(drone.x)
     centro_z = area.top + area.height // 2 + int(drone.z)
     tamanho = 20
@@ -161,7 +181,6 @@ def desenhar_vista_superior(screen, drone, area):
     screen.blit(txt, (area.left + 10, area.top + 10))
 
 def desenhar_vista_lateral(screen, drone, area):
-    pygame.draw.rect(screen, (200, 255, 200), area)
 
     centro_z_tela = area.left + area.width // 2 + int(drone.z)
     centro_y_tela = area.top + int(drone.y)
@@ -229,7 +248,7 @@ def desenhar_obstaculos_lateral(screen, obstaculos, area):
         # Posição vertical na tela é baseada na altura do obstáculo. O chão está em 300.
         pos_y_tela = area.top + (300 - obs.altura)
         
-        # Na vista lateral, a "largura" que vemos é a profundidade do obstáculo
+        # Na vista lateral, a largura é a profundidade do obstáculo
         largura_na_tela = obs.rect_chao.height # Usar profundidade
         altura_na_tela = obs.altura
         
@@ -241,6 +260,7 @@ def main():
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
     pygame.display.set_caption("Drone 3D Simulado - Duas Vistas")
+    
     clock = pygame.time.Clock()
     drone = Drone()
 
@@ -263,12 +283,14 @@ def main():
         screen.fill((255, 255, 255))
 
         # Desenha a vista de cima
-        desenhar_vista_superior(screen, drone, tela_cima)
+        pygame.draw.rect(screen, (220, 240, 255), tela_cima)
         desenhar_obstaculos_superior(screen, obstaculos, tela_cima)
+        desenhar_vista_superior(screen, drone, tela_cima)
 
         # Desenha a vista lateral
-        desenhar_vista_lateral(screen, drone, tela_lado)
+        pygame.draw.rect(screen, (200, 255, 200), tela_lado)
         desenhar_obstaculos_lateral(screen, obstaculos, tela_lado)
+        desenhar_vista_lateral(screen, drone, tela_lado)
 
         # Telemetria por cima de tudo
         desenhar_telemetria(screen, drone)
